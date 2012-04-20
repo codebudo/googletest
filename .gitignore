@@ -4,3 +4,4 @@ xcode/gtest.xcodeproj/*.perspectivev3
 *.xcworkspace
 xcuserdata
 work/
+lib/
