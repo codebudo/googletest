@@ -41,12 +41,12 @@
 // part of Google Test's implementation; otherwise it's undefined.
 #if !GTEST_IMPLEMENTATION_
 // A user is trying to include this from his code - just say no.
-#error "gtest-internal-inl.h is part of Google Test's internal implementation."
-#error "It must not be included except by Google Test itself."
+# error "gtest-internal-inl.h is part of Google Test's internal implementation."
+# error "It must not be included except by Google Test itself."
 #endif  // GTEST_IMPLEMENTATION_
 
 #ifndef _WIN32_WCE
-#include <errno.h>
+# include <errno.h>
 #endif  // !_WIN32_WCE
 #include <stddef.h>
 #include <stdlib.h>  // For strtoll/_strtoul64/malloc/free.
@@ -59,7 +59,7 @@
 #include "gtest/internal/gtest-port.h"
 
 #if GTEST_OS_WINDOWS
-#include <windows.h>  // For DWORD.
+# include <windows.h>  // NOLINT
 #endif  // GTEST_OS_WINDOWS
 
 #include "gtest/gtest.h"  // NOLINT
@@ -111,6 +111,12 @@ GTEST_API_ bool ShouldUseColor(bool stdout_is_tty);
 
 // Formats the given time in milliseconds as seconds.
 GTEST_API_ std::string FormatTimeInMillisAsSeconds(TimeInMillis ms);
+
+// Converts the given time in milliseconds to a date string in the ISO 8601
+// format, without the timezone information.  N.B.: due to the use the
+// non-reentrant localtime() function, this function is not thread safe.  Do
+// not use it in any code that can be called from multiple threads.
+GTEST_API_ std::string FormatEpochTimeInMillisAsIso8601(TimeInMillis ms);
 
 // Parses a string for an Int32 flag, in the form of "--flag=value".
 //
@@ -190,6 +196,7 @@ class GTestFlagSaver {
     GTEST_FLAG(stream_result_to) = stream_result_to_;
     GTEST_FLAG(throw_on_failure) = throw_on_failure_;
   }
+
  private:
   // Fields for saving the original values of flags.
   bool also_run_disabled_tests_;
@@ -271,7 +278,14 @@ GTEST_API_ bool ShouldRunTestOnShard(
 // the given predicate.
 template <class Container, typename Predicate>
 inline int CountIf(const Container& c, Predicate predicate) {
-  return static_cast<int>(std::count_if(c.begin(), c.end(), predicate));
+  // Implemented as an explicit loop since std::count_if() in libCstd on
+  // Solaris has a non-standard signature.
+  int count = 0;
+  for (typename Container::const_iterator it = c.begin(); it != c.end(); ++it) {
+    if (predicate(*it))
+      ++count;
+  }
+  return count;
 }
 
 // Applies a function/functor to each element in the container.
@@ -425,8 +439,11 @@ class OsStackTraceGetterInterface {
 class OsStackTraceGetter : public OsStackTraceGetterInterface {
  public:
   OsStackTraceGetter() : caller_frame_(NULL) {}
-  virtual String CurrentStackTrace(int max_depth, int skip_count);
-  virtual void UponLeavingGTest();
+
+  virtual String CurrentStackTrace(int max_depth, int skip_count)
+      GTEST_LOCK_EXCLUDED_(mutex_);
+
+  virtual void UponLeavingGTest() GTEST_LOCK_EXCLUDED_(mutex_);
 
   // This string is inserted in place of stack frames that are part of
   // Google Test's implementation.
@@ -541,6 +558,10 @@ class GTEST_API_ UnitTestImpl {
   // Gets the number of tests that should run.
   int test_to_run_count() const;
 
+  // Gets the time of the test program start, in ms from the start of the
+  // UNIX epoch.
+  TimeInMillis start_timestamp() const { return start_timestamp_; }
+
   // Gets the elapsed time, in milliseconds.
   TimeInMillis elapsed_time() const { return elapsed_time_; }
 
@@ -599,7 +620,7 @@ class GTEST_API_ UnitTestImpl {
   // For example, if Foo() calls Bar(), which in turn calls
   // CurrentOsStackTraceExceptTop(1), Foo() will be included in the
   // trace but Bar() and CurrentOsStackTraceExceptTop() won't.
-  String CurrentOsStackTraceExceptTop(int skip_count);
+  String CurrentOsStackTraceExceptTop(int skip_count) GTEST_NO_INLINE_;
 
   // Finds and returns a TestCase with the given name.  If one doesn't
   // exist, creates one and returns it.
@@ -607,10 +628,12 @@ class GTEST_API_ UnitTestImpl {
   // Arguments:
   //
   //   test_case_name: name of the test case
+  //   type_param:     the name of the test's type parameter, or NULL if
+  //                   this is not a typed or a type-parameterized test.
   //   set_up_tc:      pointer to the function that sets up the test case
   //   tear_down_tc:   pointer to the function that tears down the test case
   TestCase* GetTestCase(const char* test_case_name,
-                        const char* comment,
+                        const char* type_param,
                         Test::SetUpTestCaseFunc set_up_tc,
                         Test::TearDownTestCaseFunc tear_down_tc);
 
@@ -623,7 +646,7 @@ class GTEST_API_ UnitTestImpl {
   //   test_info:    the TestInfo object
   void AddTestInfo(Test::SetUpTestCaseFunc set_up_tc,
                    Test::TearDownTestCaseFunc tear_down_tc,
-                   TestInfo * test_info) {
+                   TestInfo* test_info) {
     // In order to support thread-safe death tests, we need to
     // remember the original working directory when the test program
     // was first invoked.  We cannot do this in RUN_ALL_TESTS(), as
@@ -638,7 +661,7 @@ class GTEST_API_ UnitTestImpl {
     }
 
     GetTestCase(test_info->test_case_name(),
-                test_info->test_case_comment(),
+                test_info->type_param(),
                 set_up_tc,
                 tear_down_tc)->AddTestInfo(test_info);
   }
@@ -871,6 +894,10 @@ class GTEST_API_ UnitTestImpl {
   // Our random number generator.
   internal::Random random_;
 
+  // The time of the test program start, in ms from the start of the
+  // UNIX epoch.
+  TimeInMillis start_timestamp_;
+
   // How long the test took to run, in milliseconds.
   TimeInMillis elapsed_time_;
 
@@ -928,7 +955,7 @@ GTEST_API_ void ParseGoogleTestFlagsOnly(int* argc, wchar_t** argv);
 // platform.
 GTEST_API_ String GetLastErrnoDescription();
 
-#if GTEST_OS_WINDOWS
+# if GTEST_OS_WINDOWS
 // Provides leak-safe Windows kernel handle ownership.
 class AutoHandle {
  public:
@@ -952,7 +979,7 @@ class AutoHandle {
 
   GTEST_DISALLOW_COPY_AND_ASSIGN_(AutoHandle);
 };
-#endif  // GTEST_OS_WINDOWS
+# endif  // GTEST_OS_WINDOWS
 
 // Attempts to parse a string into a positive integer pointed to by the
 // number parameter.  Returns true if that is possible.
@@ -971,14 +998,20 @@ bool ParseNaturalNumber(const ::std::string& str, Integer* number) {
   char* end;
   // BiggestConvertible is the largest integer type that system-provided
   // string-to-number conversion routines can return.
-#if GTEST_OS_WINDOWS && !defined(__GNUC__)
+
+# if GTEST_OS_WINDOWS && !defined(__GNUC__)
+
   // MSVC and C++ Builder define __int64 instead of the standard long long.
   typedef unsigned __int64 BiggestConvertible;
   const BiggestConvertible parsed = _strtoui64(str.c_str(), &end, 10);
-#else
+
+# else
+
   typedef unsigned long long BiggestConvertible;  // NOLINT
   const BiggestConvertible parsed = strtoull(str.c_str(), &end, 10);
-#endif  // GTEST_OS_WINDOWS && !defined(__GNUC__)
+
+# endif  // GTEST_OS_WINDOWS && !defined(__GNUC__)
+
   const bool parse_success = *end == '\0' && errno == 0;
 
   // TODO(vladl@google.com): Convert this to compile time assertion when it is

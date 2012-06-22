@@ -157,8 +157,8 @@ GTEST_API_ bool ExitedUnsuccessfully(int exit_status);
 
 // Traps C++ exceptions escaping statement and reports them as test
 // failures. Note that trapping SEH exceptions is not implemented here.
-#if GTEST_HAS_EXCEPTIONS
-#define GTEST_EXECUTE_DEATH_TEST_STATEMENT_(statement, death_test) \
+# if GTEST_HAS_EXCEPTIONS
+#  define GTEST_EXECUTE_DEATH_TEST_STATEMENT_(statement, death_test) \
   try { \
     GTEST_SUPPRESS_UNREACHABLE_CODE_WARNING_BELOW_(statement); \
   } catch (const ::std::exception& gtest_exception) { \
@@ -173,14 +173,16 @@ GTEST_API_ bool ExitedUnsuccessfully(int exit_status);
   } catch (...) { \
     death_test->Abort(::testing::internal::DeathTest::TEST_THREW_EXCEPTION); \
   }
-#else
-#define GTEST_EXECUTE_DEATH_TEST_STATEMENT_(statement, death_test) \
+
+# else
+#  define GTEST_EXECUTE_DEATH_TEST_STATEMENT_(statement, death_test) \
   GTEST_SUPPRESS_UNREACHABLE_CODE_WARNING_BELOW_(statement)
-#endif
+
+# endif
 
 // This macro is for implementing ASSERT_DEATH*, EXPECT_DEATH*,
 // ASSERT_EXIT*, and EXPECT_EXIT*.
-#define GTEST_DEATH_TEST_(statement, predicate, regex, fail) \
+# define GTEST_DEATH_TEST_(statement, predicate, regex, fail) \
   GTEST_AMBIGUOUS_ELSE_BLOCKER_ \
   if (::testing::internal::AlwaysTrue()) { \
     const ::testing::internal::RE& gtest_regex = (regex); \
@@ -214,6 +216,17 @@ GTEST_API_ bool ExitedUnsuccessfully(int exit_status);
       fail(::testing::internal::DeathTest::LastMessage())
 // The symbol "fail" here expands to something into which a message
 // can be streamed.
+
+// This macro is for implementing ASSERT/EXPECT_DEBUG_DEATH when compiled in
+// NDEBUG mode. In this case we need the statements to be executed, the regex is
+// ignored, and the macro must accept a streamed message even though the message
+// is never printed.
+# define GTEST_EXECUTE_STATEMENT_(statement, regex) \
+  GTEST_AMBIGUOUS_ELSE_BLOCKER_ \
+  if (::testing::internal::AlwaysTrue()) { \
+     GTEST_SUPPRESS_UNREACHABLE_CODE_WARNING_BELOW_(statement); \
+  } else \
+    ::testing::Message()
 
 // A class representing the parsed contents of the
 // --gtest_internal_run_death_test flag, as it existed when
@@ -285,7 +298,7 @@ InternalRunDeathTestFlag* ParseInternalRunDeathTestFlag();
 //  statement unconditionally returns or throws. The Message constructor at
 //  the end allows the syntax of streaming additional messages into the
 //  macro, for compilational compatibility with EXPECT_DEATH/ASSERT_DEATH.
-#define GTEST_UNSUPPORTED_DEATH_TEST_(statement, regex, terminator) \
+# define GTEST_UNSUPPORTED_DEATH_TEST_(statement, regex, terminator) \
     GTEST_AMBIGUOUS_ELSE_BLOCKER_ \
     if (::testing::internal::AlwaysTrue()) { \
       GTEST_LOG_(WARNING) \
